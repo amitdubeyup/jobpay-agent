@@ -10,9 +10,12 @@ from app.api import api_router
 from app.middleware import (
     RateLimitMiddleware, 
     RequestLoggingMiddleware, 
-    ErrorHandlingMiddleware
+    ErrorHandlingMiddleware,
+    MetricsMiddleware
 )
 from app.exceptions import JobPayException
+from app.monitoring import metrics, health_checker
+from app.docs import create_openapi_schema
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +25,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Create FastAPI app with enhanced metadata
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -30,10 +33,29 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    contact={
+        "name": "JobPay India",
+        "url": "https://jobpay.in",
+        "email": "support@jobpay.in"
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT"
+    },
+    servers=[
+        {
+            "url": "/",
+            "description": "Current environment"
+        }
+    ]
 )
+
+# Set custom OpenAPI schema
+app.openapi = lambda: create_openapi_schema(app)
 
 # Add custom middleware in order (last added = first executed)
 app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RateLimitMiddleware)
 
@@ -45,6 +67,7 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Response-Time", "X-Request-ID"]
     )
 
 # Add trusted host middleware
@@ -62,7 +85,8 @@ async def jobpay_exception_handler(request: Request, exc: JobPayException):
             "error_code": exc.error_code,
             "message": exc.message,
             "details": exc.details,
-            "path": str(request.url.path)
+            "path": str(request.url.path),
+            "timestamp": time.time()
         }
     )
 
@@ -76,7 +100,8 @@ async def not_found_handler(request: Request, exc):
             "error": True,
             "error_code": "NOT_FOUND",
             "message": "Not found",
-            "path": str(request.url.path)
+            "path": str(request.url.path),
+            "timestamp": time.time()
         }
     )
 
@@ -89,24 +114,36 @@ async def internal_error_handler(request: Request, exc):
         content={
             "error": True,
             "error_code": "INTERNAL_SERVER_ERROR",
-            "message": "Internal server error"
+            "message": "Internal server error",
+            "timestamp": time.time()
         }
     )
 
 
+# Application event handlers
+@app.on_event("startup")
+async def startup_event():
+    """Initialize application on startup."""
+    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Debug mode: {settings.DEBUG}")
+    
+    # Perform startup health checks
+    health_status = await health_checker.comprehensive_health_check()
+    if health_status["status"] == "unhealthy":
+        logger.warning("Application started with unhealthy dependencies")
+    else:
+        logger.info("Application started successfully")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up on application shutdown."""
+    logger.info("Shutting down application")
+
+
 # Include API routes
-app.include_router(api_router, prefix=settings.API_V1_STR)
-
-
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": settings.VERSION,
-        "environment": settings.ENVIRONMENT
-    }
+app.include_router(api_router, prefix="/api")
 
 
 # Root endpoint
@@ -116,8 +153,11 @@ async def root():
     return {
         "message": f"Welcome to {settings.PROJECT_NAME}",
         "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
         "docs": f"{settings.API_V1_STR}/docs",
-        "health": "/health"
+        "health": f"{settings.API_V1_STR}/health",
+        "metrics": f"{settings.API_V1_STR}/metrics",
+        "api_version": "v1"
     }
 
 
@@ -127,5 +167,6 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=settings.DEBUG
+        reload=settings.DEBUG,
+        log_level="info"
     )

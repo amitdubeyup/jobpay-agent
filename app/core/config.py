@@ -1,4 +1,4 @@
-from pydantic import validator
+from pydantic import validator, Field
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 from functools import lru_cache
@@ -14,8 +14,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_URL_SYNC: str
     
-    # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    # Redis Configuration
+    REDIS_URL: Optional[str] = Field(default="redis://localhost:6379/0", env="REDIS_URL")
+    REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
+    REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
+    REDIS_DB: int = Field(default=0, env="REDIS_DB")
+    REDIS_PASSWORD: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
     
     # JWT
     SECRET_KEY: str
@@ -53,8 +57,17 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "AI-powered job matching agent"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = []
+    # CORS Configuration
+    BACKEND_CORS_ORIGINS: List[str] = Field(default=[], env="BACKEND_CORS_ORIGINS")
+    
+    @property
+    def redis_url_computed(self) -> str:
+        """Compute Redis URL from components if not provided directly."""
+        if self.REDIS_URL:
+            return self.REDIS_URL
+        
+        auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v):
