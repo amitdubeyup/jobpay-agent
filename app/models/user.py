@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ARRAY, JSON, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ARRAY, JSON, Enum as SQLEnum, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects import postgresql, sqlite
 from app.db.session import Base
 import enum
 
@@ -34,10 +35,10 @@ class Candidate(Base):
     __tablename__ = "candidates"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
     location = Column(String, nullable=True)
-    skills = Column(ARRAY(String), nullable=True, default=[])
-    hobbies = Column(ARRAY(String), nullable=True, default=[])
+    skills = Column(JSON().with_variant(postgresql.ARRAY(String), 'postgresql'), nullable=True)
+    hobbies = Column(JSON().with_variant(postgresql.ARRAY(String), 'postgresql'), nullable=True)
     experience_years = Column(Integer, nullable=True)
     education = Column(String, nullable=True)
     bio = Column(Text, nullable=True)
@@ -55,7 +56,7 @@ class Employer(Base):
     __tablename__ = "employers"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
     company_name = Column(String, nullable=False)
     company_description = Column(Text, nullable=True)
     website = Column(String, nullable=True)

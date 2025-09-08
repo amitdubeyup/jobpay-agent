@@ -2,11 +2,10 @@ import asyncio
 from typing import List, Dict, Any, Tuple
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.schema import Document
-from langchain.vectorstores import FAISS
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_core.documents import Document
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import logging
 

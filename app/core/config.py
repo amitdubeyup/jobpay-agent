@@ -1,4 +1,5 @@
-from pydantic import BaseSettings, validator
+from pydantic import validator
+from pydantic_settings import BaseSettings
 from typing import List, Optional
 from functools import lru_cache
 import os
@@ -77,6 +78,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Ignore extra fields in .env file
 
 
 @lru_cache()
