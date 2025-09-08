@@ -7,6 +7,12 @@ import logging
 
 from app.core.config import settings
 from app.api import api_router
+from app.middleware import (
+    RateLimitMiddleware, 
+    RequestLoggingMiddleware, 
+    ErrorHandlingMiddleware
+)
+from app.exceptions import JobPayException
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +32,11 @@ app = FastAPI(
     redoc_url=f"{settings.API_V1_STR}/redoc",
 )
 
+# Add custom middleware in order (last added = first executed)
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
 # Add CORS middleware
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(
@@ -40,22 +51,33 @@ if settings.BACKEND_CORS_ORIGINS:
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 
-# Request timing middleware
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
+# Custom exception handlers for JobPay exceptions
+@app.exception_handler(JobPayException)
+async def jobpay_exception_handler(request: Request, exc: JobPayException):
+    """Handle JobPay custom exceptions."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "error_code": exc.error_code,
+            "message": exc.message,
+            "details": exc.details,
+            "path": str(request.url.path)
+        }
+    )
 
 
-# Exception handlers
+# Default exception handlers
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
     return JSONResponse(
         status_code=404,
-        content={"detail": "Not found", "path": str(request.url)}
+        content={
+            "error": True,
+            "error_code": "NOT_FOUND",
+            "message": "Not found",
+            "path": str(request.url.path)
+        }
     )
 
 
@@ -64,7 +86,11 @@ async def internal_error_handler(request: Request, exc):
     logger.error(f"Internal server error: {exc}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error"}
+        content={
+            "error": True,
+            "error_code": "INTERNAL_SERVER_ERROR",
+            "message": "Internal server error"
+        }
     )
 
 
