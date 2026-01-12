@@ -12,9 +12,6 @@ Background service layer for JobPay utilizing Python and Celery for asynchronous
 ## 🛠️ Tech Stack
 *   **Python**
 
-## 👨‍💻 Lead Maintainer
-[@amitdubeyup](https://github.com/amitdubeyup)
-
 ## 📦 Installation
 
 1.  **Clone the repository**:
@@ -29,6 +26,9 @@ Background service layer for JobPay utilizing Python and Celery for asynchronous
     ```bash
     npm start    # or python app.py
     ```
+
+## 👨‍💻 Lead Maintainer
+[@amitdubeyup](https://github.com/amitdubeyup)
 
 ## 📄 License
 This project is licensed under the **MIT License**.
