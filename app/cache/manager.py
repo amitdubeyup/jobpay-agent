@@ -1,11 +1,15 @@
 """
 Redis-based caching implementation for the JobPay Agent.
+
+SECURITY NOTE: This module uses JSON serialization only.
+Pickle has been intentionally removed due to security risks
+(arbitrary code execution via malicious pickled objects).
 """
 
 import json
-import pickle
 from typing import Any, Optional, Union, Dict, List
-from datetime import timedelta
+from datetime import timedelta, datetime, date
+from decimal import Decimal
 import redis
 import logging
 from functools import wraps
@@ -13,20 +17,68 @@ import hashlib
 
 from app.core.config import settings
 from app.constants import (
-    CACHE_TTL_SHORT, 
-    CACHE_TTL_MEDIUM, 
-    CACHE_TTL_LONG, 
+    CACHE_TTL_SHORT,
+    CACHE_TTL_MEDIUM,
+    CACHE_TTL_LONG,
     CACHE_TTL_DAILY
 )
 
 logger = logging.getLogger(__name__)
 
 
+class SafeJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that handles common Python types safely.
+    Replaces pickle for serialization of complex objects.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return {"__type__": "datetime", "value": obj.isoformat()}
+        if isinstance(obj, date):
+            return {"__type__": "date", "value": obj.isoformat()}
+        if isinstance(obj, Decimal):
+            return {"__type__": "decimal", "value": str(obj)}
+        if isinstance(obj, bytes):
+            return {"__type__": "bytes", "value": obj.decode('utf-8', errors='replace')}
+        if isinstance(obj, set):
+            return {"__type__": "set", "value": list(obj)}
+        if hasattr(obj, '__dict__'):
+            return {"__type__": "object", "class": obj.__class__.__name__, "value": obj.__dict__}
+        return super().default(obj)
+
+
+def safe_json_decoder(obj):
+    """
+    Custom JSON decoder that restores special types.
+    """
+    if isinstance(obj, dict) and "__type__" in obj:
+        type_name = obj["__type__"]
+        value = obj["value"]
+
+        if type_name == "datetime":
+            return datetime.fromisoformat(value)
+        if type_name == "date":
+            return date.fromisoformat(value)
+        if type_name == "decimal":
+            return Decimal(value)
+        if type_name == "bytes":
+            return value.encode('utf-8')
+        if type_name == "set":
+            return set(value)
+        # For objects, return as dict (cannot reconstruct class instances safely)
+        if type_name == "object":
+            return value
+    return obj
+
+
 class CacheManager:
     """
     Redis-based cache manager with fallback to in-memory cache.
+
+    SECURITY: Uses JSON serialization only - no pickle allowed.
     """
-    
+
     def __init__(self):
         self.redis_client = None
         self.memory_cache: Dict[str, Any] = {}
@@ -84,19 +136,22 @@ class CacheManager:
         return full_key
     
     def get(self, namespace: str, key: str, **kwargs) -> Optional[Any]:
-        """Get value from cache."""
+        """Get value from cache using JSON deserialization only."""
         cache_key = self._generate_key(namespace, key, **kwargs)
-        
+
         # Try Redis first
         if self.redis_client:
             try:
                 value = self.redis_client.get(cache_key)
                 if value is not None:
                     try:
-                        return json.loads(value)
-                    except json.JSONDecodeError:
-                        # Fallback to pickle for complex objects
-                        return pickle.loads(value.encode('latin1'))
+                        return json.loads(value, object_hook=safe_json_decoder)
+                    except json.JSONDecodeError as e:
+                        # Log and return None for corrupted/invalid cache entries
+                        logger.warning(f"Invalid JSON in cache for key {cache_key}: {e}")
+                        # Delete the corrupted entry
+                        self.redis_client.delete(cache_key)
+                        return None
             except Exception as e:
                 logger.warning(f"Redis get error: {e}")
         
@@ -114,27 +169,28 @@ class CacheManager:
         return None
     
     def set(
-        self, 
-        namespace: str, 
-        key: str, 
-        value: Any, 
+        self,
+        namespace: str,
+        key: str,
+        value: Any,
         ttl: int = CACHE_TTL_MEDIUM,
         **kwargs
     ) -> bool:
-        """Set value in cache with TTL."""
+        """Set value in cache with TTL using JSON serialization only."""
         cache_key = self._generate_key(namespace, key, **kwargs)
-        
+
         # Try Redis first
         if self.redis_client:
             try:
-                if isinstance(value, (dict, list, str, int, float, bool)):
-                    serialized_value = json.dumps(value)
-                else:
-                    # Use pickle for complex objects
-                    serialized_value = pickle.dumps(value).decode('latin1')
-                
+                # Use SafeJSONEncoder for all objects
+                serialized_value = json.dumps(value, cls=SafeJSONEncoder)
                 self.redis_client.setex(cache_key, ttl, serialized_value)
                 return True
+            except (TypeError, ValueError) as e:
+                # Object cannot be serialized to JSON
+                logger.warning(f"Cannot serialize value for key {cache_key}: {e}")
+                logger.warning("Consider making the object JSON-serializable")
+                return False
             except Exception as e:
                 logger.warning(f"Redis set error: {e}")
         

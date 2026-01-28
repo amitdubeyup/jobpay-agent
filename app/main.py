@@ -70,8 +70,12 @@ if settings.BACKEND_CORS_ORIGINS:
         expose_headers=["X-Response-Time", "X-Request-ID"]
     )
 
-# Add trusted host middleware
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+# Add trusted host middleware with configurable allowed hosts
+# SECURITY: Never use ["*"] in production - it defeats the purpose of the middleware
+_allowed_hosts = ["localhost", "127.0.0.1", "jobpay.in", "*.jobpay.in", "api.jobpay.in"]
+if settings.ENVIRONMENT == "development":
+    _allowed_hosts.append("*")  # Allow all hosts only in development
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
 
 
 # Custom exception handlers for JobPay exceptions
